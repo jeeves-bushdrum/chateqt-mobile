@@ -12,9 +12,11 @@
       }
     },
     "preview": {
-      "distribution": "internal",
+      "distribution": "store",
       "ios": {
-        "buildConfiguration": "Release"
+        "buildConfiguration": "Release",
+        "autoSubmit": true,
+        "autoIncrement": true
       }
     },
     "production": {
