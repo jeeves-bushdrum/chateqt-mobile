@@ -13,7 +13,6 @@
     },
     "preview": {
       "distribution": "store",
-      "autoSubmit": true,
       "ios": {
         "buildConfiguration": "Release",
         "autoIncrement": true
