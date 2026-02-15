@@ -1,4 +1,7 @@
 node_modules/
+*.p8
+*.p12
+*.mobileprovision
 dist/
 .expo/
 *.jks
