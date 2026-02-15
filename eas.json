@@ -26,6 +26,14 @@
     }
   },
   "submit": {
+    "preview": {
+      "ios": {
+        "appleTeamId": "9N74DA3YL8",
+        "ascApiKeyId": "J7WPRZSQT6",
+        "ascApiKeyIssuerId": "69a6de87-616c-47e3-e053-5b8c7c11a4d1",
+        "ascApiKeyPath": "./AuthKey_J7WPRZSQT6.p8"
+      }
+    },
     "production": {
       "ios": {
         "appleTeamId": "9N74DA3YL8",
