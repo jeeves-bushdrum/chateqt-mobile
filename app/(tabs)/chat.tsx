@@ -17,6 +17,8 @@ import { getStoredUser, AuthUser } from "../../lib/auth";
 import { streamChat } from "../../lib/api";
 import { registerForPushNotifications, sendLocalNotification } from "../../lib/notifications";
 import { useNetwork } from "../../lib/useNetwork";
+import { fetchUsage, UsageData } from "../../lib/usage";
+import { getToken } from "../../lib/auth";
 import { colors, spacing } from "../../lib/theme";
 
 interface ChatMessage {
@@ -114,11 +116,17 @@ export default function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const appStateRef = useRef(AppState.currentState);
   const isConnected = useNetwork();
+  const [usage, setUsage] = useState<UsageData | null>(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
 
   useEffect(() => {
     getStoredUser().then((u) => {
       setUser(u);
       if (u) registerForPushNotifications();
+    });
+    // Fetch usage
+    getToken().then((token) => {
+      if (token) fetchUsage(token).then(setUsage).catch(() => {});
     });
     const sub = AppState.addEventListener("change", (state) => {
       appStateRef.current = state;
@@ -133,6 +141,13 @@ export default function ChatScreen() {
   const submit = useCallback(
     async (text: string) => {
       if (!text.trim() || !user || loading) return;
+
+      // Check free tier limit
+      if (usage && usage.plan === "free" && usage.remaining <= 0) {
+        setShowUpgrade(true);
+        return;
+      }
+
       const query = text.trim();
       setInput("");
 
@@ -208,6 +223,10 @@ export default function ChatScreen() {
           if (convId) setConversationId(convId);
           setLoading(false);
           setStatus("");
+          // Refresh usage count
+          getToken().then((token) => {
+            if (token) fetchUsage(token).then(setUsage).catch(() => {});
+          });
         },
         onError: (error) => {
           setMessages((prev) => {
@@ -281,6 +300,49 @@ export default function ChatScreen() {
             <Text style={styles.statusText}>{status}</Text>
           </View>
         ) : null}
+
+        {/* Usage indicator for free users */}
+        {usage && usage.plan === "free" && (
+          <View style={styles.usageBar}>
+            <Text style={styles.usageText}>
+              {usage.remaining}/{usage.limit} queries remaining today
+            </Text>
+            {usage.remaining <= 1 && (
+              <TouchableOpacity onPress={() => Linking.openURL("https://chateqt.com/pricing")}>
+                <Text style={styles.upgradeLink}>Upgrade →</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* Pro badge */}
+        {usage && usage.plan === "pro" && (
+          <View style={styles.proBadgeBar}>
+            <Text style={styles.proBadgeText}>⚡ Pro — Unlimited queries</Text>
+          </View>
+        )}
+
+        {/* Upgrade modal */}
+        {showUpgrade && (
+          <View style={styles.upgradeModal}>
+            <Text style={styles.upgradeTitle}>Daily limit reached</Text>
+            <Text style={styles.upgradeDesc}>
+              You've used all 5 free queries today. Upgrade to Pro for unlimited research.
+            </Text>
+            <TouchableOpacity
+              style={styles.upgradeBtn}
+              onPress={() => {
+                Linking.openURL("https://chateqt.com/pricing");
+                setShowUpgrade(false);
+              }}
+            >
+              <Text style={styles.upgradeBtnText}>⚡ Upgrade to Pro — $19/mo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowUpgrade(false)}>
+              <Text style={styles.upgradeDismiss}>Maybe later</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <View style={styles.inputRow}>
           <TextInput
@@ -393,6 +455,57 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   offlineText: { color: "#fdba74", fontSize: 13, fontWeight: "500" },
+  usageBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  usageText: { color: colors.textMuted, fontSize: 12 },
+  upgradeLink: { color: colors.blue, fontSize: 12, fontWeight: "600" },
+  proBadgeBar: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 4,
+    alignItems: "center",
+  },
+  proBadgeText: { color: colors.blueLight, fontSize: 11, fontWeight: "600" },
+  upgradeModal: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    alignItems: "center",
+  },
+  upgradeTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: spacing.sm,
+  },
+  upgradeDesc: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: spacing.md,
+  },
+  upgradeBtn: {
+    backgroundColor: colors.blue,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    width: "100%",
+    alignItems: "center",
+    marginBottom: spacing.sm,
+  },
+  upgradeBtnText: { color: colors.text, fontSize: 16, fontWeight: "600" },
+  upgradeDismiss: { color: colors.textMuted, fontSize: 14 },
   onboarding: {
     flex: 1,
     justifyContent: "center",
