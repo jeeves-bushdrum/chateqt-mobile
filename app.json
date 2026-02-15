@@ -36,6 +36,13 @@
       "expo-router",
       "expo-secure-store",
       "expo-notifications"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "11591b32-7f8e-4b23-b70b-5f5758e67d8f"
+      }
+    },
+    "owner": "jeeves-bushdrum"
   }
 }
