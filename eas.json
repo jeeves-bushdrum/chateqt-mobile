@@ -13,9 +13,9 @@
     },
     "preview": {
       "distribution": "store",
+      "autoSubmit": true,
       "ios": {
         "buildConfiguration": "Release",
-        "autoSubmit": true,
         "autoIncrement": true
       }
     },
