@@ -10,10 +10,13 @@ import {
   Platform,
   ActivityIndicator,
   Linking,
+  AppState,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getStoredUser, AuthUser } from "../../lib/auth";
 import { streamChat } from "../../lib/api";
+import { registerForPushNotifications, sendLocalNotification } from "../../lib/notifications";
+import { useNetwork } from "../../lib/useNetwork";
 import { colors, spacing } from "../../lib/theme";
 
 interface ChatMessage {
@@ -109,9 +112,18 @@ export default function ChatScreen() {
   const [status, setStatus] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
+  const appStateRef = useRef(AppState.currentState);
+  const isConnected = useNetwork();
 
   useEffect(() => {
-    getStoredUser().then(setUser);
+    getStoredUser().then((u) => {
+      setUser(u);
+      if (u) registerForPushNotifications();
+    });
+    const sub = AppState.addEventListener("change", (state) => {
+      appStateRef.current = state;
+    });
+    return () => sub.remove();
   }, []);
 
   const scrollToBottom = useCallback(() => {
@@ -183,6 +195,13 @@ export default function ChatScreen() {
             const last = updated[updated.length - 1];
             if (last.role === "assistant") {
               last.streaming = false;
+              // Send local notification if app is backgrounded
+              if (appStateRef.current !== "active") {
+                sendLocalNotification(
+                  "ChatEQT",
+                  last.content.slice(0, 100) + (last.content.length > 100 ? "..." : "")
+                );
+              }
             }
             return updated;
           });
@@ -250,6 +269,12 @@ export default function ChatScreen() {
           />
         )}
 
+        {!isConnected && (
+          <View style={styles.offlineBanner}>
+            <Text style={styles.offlineText}>📡 No internet connection</Text>
+          </View>
+        )}
+
         {status ? (
           <View style={styles.statusBar}>
             <ActivityIndicator size="small" color={colors.blue} />
@@ -273,7 +298,7 @@ export default function ChatScreen() {
           <TouchableOpacity
             style={[styles.sendBtn, (!input.trim() || loading) && styles.sendBtnDisabled]}
             onPress={() => submit(input)}
-            disabled={!input.trim() || loading}
+            disabled={!input.trim() || loading || !isConnected}
           >
             <Text style={styles.sendBtnText}>↑</Text>
           </TouchableOpacity>
@@ -361,6 +386,13 @@ const styles = StyleSheet.create({
   },
   sendBtnDisabled: { opacity: 0.4 },
   sendBtnText: { color: colors.text, fontSize: 18, fontWeight: "700" },
+  offlineBanner: {
+    backgroundColor: "#7c2d12",
+    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    alignItems: "center",
+  },
+  offlineText: { color: "#fdba74", fontSize: 13, fontWeight: "500" },
   onboarding: {
     flex: 1,
     justifyContent: "center",

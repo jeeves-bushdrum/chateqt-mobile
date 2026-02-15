@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -7,31 +7,48 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  RefreshControl,
 } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import { getStoredUser, AuthUser } from "../../lib/auth";
 import {
   listConversations,
   deleteConversation,
   Conversation,
 } from "../../lib/api";
+import { cacheConversations, getCachedConversations } from "../../lib/cache";
+import { useNetwork } from "../../lib/useNetwork";
 import { colors, spacing } from "../../lib/theme";
 
 export default function HistoryScreen() {
-  const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [offline, setOffline] = useState(false);
+  const isConnected = useNetwork();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isRefresh = false) => {
     const u = await getStoredUser();
     setUser(u);
-    if (!u) return;
+    if (!u) {
+      setLoading(false);
+      return;
+    }
+
     try {
       const convos = await listConversations(u.email);
       setConversations(convos);
-    } catch {}
+      await cacheConversations(convos);
+      setOffline(false);
+    } catch {
+      // Offline — load from cache
+      const cached = await getCachedConversations();
+      setConversations(cached);
+      setOffline(true);
+    }
     setLoading(false);
+    if (isRefresh) setRefreshing(false);
   }, []);
 
   useFocusEffect(
@@ -40,7 +57,16 @@ export default function HistoryScreen() {
     }, [load])
   );
 
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    load(true);
+  }, [load]);
+
   const handleDelete = (conv: Conversation) => {
+    if (!isConnected) {
+      Alert.alert("Offline", "Can't delete conversations while offline");
+      return;
+    }
     Alert.alert("Delete Conversation", `Delete "${conv.title}"?`, [
       { text: "Cancel", style: "cancel" },
       {
@@ -50,7 +76,9 @@ export default function HistoryScreen() {
           if (!user) return;
           try {
             await deleteConversation(conv.id, user.email);
-            setConversations((prev) => prev.filter((c) => c.id !== conv.id));
+            const updated = conversations.filter((c) => c.id !== conv.id);
+            setConversations(updated);
+            await cacheConversations(updated);
           } catch {}
         },
       },
@@ -78,33 +106,49 @@ export default function HistoryScreen() {
   }
 
   return (
-    <FlatList
-      data={conversations}
-      keyExtractor={(c) => c.id}
-      contentContainerStyle={styles.list}
-      renderItem={({ item }) => (
-        <TouchableOpacity
-          style={styles.card}
-          onLongPress={() => handleDelete(item)}
-        >
-          <Text style={styles.cardTitle} numberOfLines={1}>
-            {item.title}
-          </Text>
-          <Text style={styles.cardDate}>
-            {new Date(item.updated_at).toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </Text>
-        </TouchableOpacity>
+    <View style={styles.wrapper}>
+      {offline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineText}>📡 Showing cached conversations</Text>
+        </View>
       )}
-    />
+      <FlatList
+        data={conversations}
+        keyExtractor={(c) => c.id}
+        contentContainerStyle={styles.list}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.blue}
+            colors={[colors.blue]}
+          />
+        }
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={styles.card}
+            onLongPress={() => handleDelete(item)}
+          >
+            <Text style={styles.cardTitle} numberOfLines={1}>
+              {item.title}
+            </Text>
+            <Text style={styles.cardDate}>
+              {new Date(item.updated_at).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </Text>
+          </TouchableOpacity>
+        )}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  wrapper: { flex: 1, backgroundColor: colors.bg },
   center: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -143,4 +187,11 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: "center",
   },
+  offlineBanner: {
+    backgroundColor: "#7c2d12",
+    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    alignItems: "center",
+  },
+  offlineText: { color: "#fdba74", fontSize: 13, fontWeight: "500" },
 });
