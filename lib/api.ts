@@ -103,6 +103,51 @@ export interface ChatStreamCallbacks {
   onError?: (error: string) => void;
 }
 
+/**
+ * Parse SSE lines from a text buffer.
+ * Returns the remaining (incomplete) buffer after processing.
+ */
+function parseSSEBuffer(
+  buffer: string,
+  callbacks: ChatStreamCallbacks
+): string {
+  const lines = buffer.split("\n");
+  const remainder = lines.pop() || ""; // last line may be incomplete
+
+  let currentEvent = "";
+  for (const line of lines) {
+    if (line.startsWith("event: ")) {
+      currentEvent = line.slice(7).trim();
+    } else if (line.startsWith("data: ")) {
+      const payload = line.slice(6).trim();
+      try {
+        const parsed = JSON.parse(payload);
+        switch (currentEvent) {
+          case "status":
+            callbacks.onStatus?.(parsed.stage, parsed);
+            break;
+          case "delta":
+            callbacks.onDelta?.(parsed.text);
+            break;
+          case "sources":
+            callbacks.onSources?.(parsed);
+            break;
+          case "suggestions":
+            callbacks.onSuggestions?.(parsed.prompts || []);
+            break;
+          case "done":
+            callbacks.onDone?.(
+              parsed.conversation_id || parsed.conversationId
+            );
+            break;
+        }
+      } catch {}
+      currentEvent = "";
+    }
+  }
+  return remainder;
+}
+
 export async function streamChat(
   query: string,
   userEmail: string,
@@ -116,72 +161,63 @@ export async function streamChat(
     ? { query, conversation_id: conversationId, messages }
     : { query, conversationId, messages };
 
-  let res: Response;
-  console.log("[ChatEQT] streamChat →", url, { hasApiKey: HAS_API_KEY, hasToken: !!(await getToken()) });
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: hdrs,
-      body: JSON.stringify(body),
-    });
-  } catch (err: any) {
-    console.error("[ChatEQT] streamChat network error:", err.message);
-    callbacks.onError?.(err.message || "Network error");
-    return;
-  }
+  console.log("[ChatEQT] streamChat →", url, {
+    hasApiKey: HAS_API_KEY,
+    hasToken: !!(await getToken()),
+  });
 
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => "");
-    console.error("[ChatEQT] streamChat HTTP error:", res.status, errBody.slice(0, 200));
-    callbacks.onError?.(`HTTP ${res.status}: ${errBody.slice(0, 100) || "Unknown error"}`);
-    return;
-  }
+  return new Promise<void>((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
 
-  const reader = res.body?.getReader();
-  if (!reader) {
-    callbacks.onError?.("No response body");
-    return;
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    let currentEvent = "";
-    for (const line of lines) {
-      if (line.startsWith("event: ")) {
-        currentEvent = line.slice(7).trim();
-      } else if (line.startsWith("data: ")) {
-        const payload = line.slice(6).trim();
-        try {
-          const parsed = JSON.parse(payload);
-          switch (currentEvent) {
-            case "status":
-              callbacks.onStatus?.(parsed.stage, parsed);
-              break;
-            case "delta":
-              callbacks.onDelta?.(parsed.text);
-              break;
-            case "sources":
-              callbacks.onSources?.(parsed);
-              break;
-            case "suggestions":
-              callbacks.onSuggestions?.(parsed.prompts || []);
-              break;
-            case "done":
-              callbacks.onDone?.(parsed.conversation_id || parsed.conversationId);
-              break;
-          }
-        } catch {}
-        currentEvent = "";
-      }
+    // Set headers
+    for (const [key, value] of Object.entries(hdrs)) {
+      xhr.setRequestHeader(key, value);
     }
-  }
+
+    let lastIndex = 0; // track how far we've parsed in responseText
+    let buffer = "";
+
+    xhr.onprogress = () => {
+      // Only process new data since last onprogress
+      const newText = xhr.responseText.slice(lastIndex);
+      lastIndex = xhr.responseText.length;
+      buffer += newText;
+      buffer = parseSSEBuffer(buffer, callbacks);
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        // Process any remaining buffer
+        if (buffer) {
+          parseSSEBuffer(buffer + "\n", callbacks);
+        }
+      } else {
+        console.error(
+          "[ChatEQT] streamChat HTTP error:",
+          xhr.status,
+          xhr.responseText.slice(0, 200)
+        );
+        callbacks.onError?.(
+          `HTTP ${xhr.status}: ${xhr.responseText.slice(0, 100) || "Unknown error"}`
+        );
+      }
+      resolve();
+    };
+
+    xhr.onerror = () => {
+      console.error("[ChatEQT] streamChat network error");
+      callbacks.onError?.("Network error — check your connection");
+      resolve();
+    };
+
+    xhr.ontimeout = () => {
+      console.error("[ChatEQT] streamChat timeout");
+      callbacks.onError?.("Request timed out — try again");
+      resolve();
+    };
+
+    xhr.timeout = 120_000; // 2 min timeout for long responses
+    xhr.send(JSON.stringify(body));
+  });
 }
