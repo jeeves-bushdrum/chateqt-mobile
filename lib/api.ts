@@ -1,5 +1,11 @@
-const BASE_URL = "https://chateqt.com/api/v1";
+import { getToken } from "./auth";
+
 const API_KEY = process.env.EXPO_PUBLIC_API_KEY || "";
+const HAS_API_KEY = API_KEY.length > 0;
+
+// When API key is set, use v1 endpoints; otherwise fall back to web API with cookie auth
+const V1_BASE = "https://chateqt.com/api/v1";
+const WEB_BASE = "https://chateqt.com/api";
 
 export interface Message {
   id: string;
@@ -16,32 +22,45 @@ export interface Conversation {
   updated_at: string;
 }
 
-function headers(userEmail: string): Record<string, string> {
+async function authHeaders(userEmail: string): Promise<Record<string, string>> {
+  if (HAS_API_KEY) {
+    return {
+      "Content-Type": "application/json",
+      "X-API-Key": API_KEY,
+      "X-User-Email": userEmail,
+    };
+  }
+  // Fall back to cookie/token auth
+  const token = await getToken();
   return {
     "Content-Type": "application/json",
-    "X-API-Key": API_KEY,
-    "X-User-Email": userEmail,
+    ...(token ? { Cookie: `chateqt_token=${token}` } : {}),
   };
 }
 
 export async function listConversations(
   userEmail: string
 ): Promise<Conversation[]> {
-  const res = await fetch(`${BASE_URL}/conversations`, {
-    headers: headers(userEmail),
-  });
+  const hdrs = await authHeaders(userEmail);
+  if (HAS_API_KEY) {
+    const res = await fetch(`${V1_BASE}/conversations`, { headers: hdrs });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return data.conversations;
+  }
+  const res = await fetch(`${WEB_BASE}/conversations`, { headers: hdrs });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  return data.conversations;
+  return data.conversations || [];
 }
 
 export async function getConversation(
   id: string,
   userEmail: string
 ): Promise<{ conversation: Conversation; messages: Message[] }> {
-  const res = await fetch(`${BASE_URL}/conversations/${id}`, {
-    headers: headers(userEmail),
-  });
+  const hdrs = await authHeaders(userEmail);
+  const base = HAS_API_KEY ? V1_BASE : WEB_BASE;
+  const res = await fetch(`${base}/conversations/${id}`, { headers: hdrs });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -50,23 +69,27 @@ export async function createConversation(
   userEmail: string,
   title?: string
 ): Promise<Conversation> {
-  const res = await fetch(`${BASE_URL}/conversations`, {
+  const hdrs = await authHeaders(userEmail);
+  const base = HAS_API_KEY ? V1_BASE : WEB_BASE;
+  const res = await fetch(`${base}/conversations`, {
     method: "POST",
-    headers: headers(userEmail),
+    headers: hdrs,
     body: JSON.stringify({ title }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  return data.conversation;
+  return data.conversation || data;
 }
 
 export async function deleteConversation(
   id: string,
   userEmail: string
 ): Promise<void> {
-  const res = await fetch(`${BASE_URL}/conversations/${id}`, {
+  const hdrs = await authHeaders(userEmail);
+  const base = HAS_API_KEY ? V1_BASE : WEB_BASE;
+  const res = await fetch(`${base}/conversations/${id}`, {
     method: "DELETE",
-    headers: headers(userEmail),
+    headers: hdrs,
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
@@ -75,6 +98,7 @@ export interface ChatStreamCallbacks {
   onStatus?: (stage: string, data?: any) => void;
   onDelta?: (text: string) => void;
   onSources?: (sources: { research: any[]; web: any[] }) => void;
+  onSuggestions?: (prompts: string[]) => void;
   onDone?: (conversationId: string) => void;
   onError?: (error: string) => void;
 }
@@ -86,15 +110,23 @@ export async function streamChat(
   messages: { role: string; content: string }[],
   callbacks: ChatStreamCallbacks
 ): Promise<void> {
-  const res = await fetch(`${BASE_URL}/chat`, {
-    method: "POST",
-    headers: headers(userEmail),
-    body: JSON.stringify({
-      query,
-      conversation_id: conversationId,
-      messages,
-    }),
-  });
+  const hdrs = await authHeaders(userEmail);
+  const url = HAS_API_KEY ? `${V1_BASE}/chat` : `${WEB_BASE}/chat`;
+  const body = HAS_API_KEY
+    ? { query, conversation_id: conversationId, messages }
+    : { query, conversationId, messages };
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: hdrs,
+      body: JSON.stringify(body),
+    });
+  } catch (err: any) {
+    callbacks.onError?.(err.message || "Network error");
+    return;
+  }
 
   if (!res.ok) {
     callbacks.onError?.(`HTTP ${res.status}`);
@@ -136,8 +168,11 @@ export async function streamChat(
             case "sources":
               callbacks.onSources?.(parsed);
               break;
+            case "suggestions":
+              callbacks.onSuggestions?.(parsed.prompts || []);
+              break;
             case "done":
-              callbacks.onDone?.(parsed.conversation_id);
+              callbacks.onDone?.(parsed.conversation_id || parsed.conversationId);
               break;
           }
         } catch {}
