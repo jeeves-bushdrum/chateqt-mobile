@@ -229,11 +229,14 @@ export default function ChatScreen() {
           });
         },
         onError: (error) => {
+          console.error("[ChatEQT] Chat request failed:", error);
           setMessages((prev) => {
             const updated = [...prev];
             const last = updated[updated.length - 1];
             if (last.role === "assistant") {
-              last.content = "Sorry, something went wrong. Please try again.";
+              last.content = __DEV__
+                ? `Error: ${error}\n\nPlease try logging out and back in.`
+                : "Sorry, something went wrong. Please try again.";
               last.streaming = false;
             }
             return updated;

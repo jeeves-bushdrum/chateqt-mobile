@@ -117,6 +117,7 @@ export async function streamChat(
     : { query, conversationId, messages };
 
   let res: Response;
+  console.log("[ChatEQT] streamChat →", url, { hasApiKey: HAS_API_KEY, hasToken: !!(await getToken()) });
   try {
     res = await fetch(url, {
       method: "POST",
@@ -124,12 +125,15 @@ export async function streamChat(
       body: JSON.stringify(body),
     });
   } catch (err: any) {
+    console.error("[ChatEQT] streamChat network error:", err.message);
     callbacks.onError?.(err.message || "Network error");
     return;
   }
 
   if (!res.ok) {
-    callbacks.onError?.(`HTTP ${res.status}`);
+    const errBody = await res.text().catch(() => "");
+    console.error("[ChatEQT] streamChat HTTP error:", res.status, errBody.slice(0, 200));
+    callbacks.onError?.(`HTTP ${res.status}: ${errBody.slice(0, 100) || "Unknown error"}`);
     return;
   }
 
