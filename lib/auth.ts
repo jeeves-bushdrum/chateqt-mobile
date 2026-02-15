@@ -56,10 +56,10 @@ export async function login(
     throw new Error(data.error || "Login failed");
   }
   const data = await res.json();
-  // Extract token from set-cookie
-  const setCookie = res.headers.get("set-cookie") || "";
-  const tokenMatch = setCookie.match(/chateqt_token=([^;]+)/);
-  if (tokenMatch) await storeToken(tokenMatch[1]);
+  // Get token from JSON body (reliable on mobile — set-cookie is unreliable in RN)
+  if (data.token) {
+    await storeToken(data.token);
+  }
   const user: AuthUser = data.user;
   await storeUser(user);
   return user;
@@ -80,9 +80,10 @@ export async function signup(
     throw new Error(data.error || "Signup failed");
   }
   const data = await res.json();
-  const setCookie = res.headers.get("set-cookie") || "";
-  const tokenMatch = setCookie.match(/chateqt_token=([^;]+)/);
-  if (tokenMatch) await storeToken(tokenMatch[1]);
+  // Get token from JSON body
+  if (data.token) {
+    await storeToken(data.token);
+  }
   const user: AuthUser = data.user;
   await storeUser(user);
   return user;

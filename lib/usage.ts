@@ -11,7 +11,7 @@ export interface UsageData {
 
 export async function fetchUsage(token: string): Promise<UsageData> {
   const res = await fetch(`${API_BASE}/api/chat/usage`, {
-    headers: { Cookie: `chateqt_token=${token}` },
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();

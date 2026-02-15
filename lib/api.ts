@@ -30,11 +30,11 @@ async function authHeaders(userEmail: string): Promise<Record<string, string>> {
       "X-User-Email": userEmail,
     };
   }
-  // Fall back to cookie/token auth
+  // Fall back to Bearer token auth (mobile-friendly, no cookie issues)
   const token = await getToken();
   return {
     "Content-Type": "application/json",
-    ...(token ? { Cookie: `chateqt_token=${token}` } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 
