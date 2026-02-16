@@ -18,6 +18,7 @@ import { streamChat } from "../../lib/api";
 import { registerForPushNotifications, sendLocalNotification } from "../../lib/notifications";
 import { useNetwork } from "../../lib/useNetwork";
 import { fetchUsage, UsageData } from "../../lib/usage";
+import { Markdown } from "../../lib/markdown";
 import { getToken } from "../../lib/auth";
 import { colors, spacing } from "../../lib/theme";
 
@@ -74,7 +75,7 @@ function SourceCard({ source }: { source: any }) {
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({ message, status }: { message: ChatMessage; status?: string }) {
   const isUser = message.role === "user";
   return (
     <View
@@ -83,15 +84,20 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         isUser ? styles.userBubble : styles.assistantBubble,
       ]}
     >
-      <Text
-        style={[
-          styles.messageText,
-          isUser ? styles.userText : styles.assistantText,
-        ]}
-      >
-        {message.content}
-        {message.streaming && "▍"}
-      </Text>
+      {isUser ? (
+        <Text style={[styles.messageText, styles.userText]}>
+          {message.content}
+        </Text>
+      ) : message.content ? (
+        <Markdown style={styles.assistantText}>
+          {message.content + (message.streaming ? "▍" : "")}
+        </Markdown>
+      ) : message.streaming && status ? (
+        <View style={styles.inlineStatus}>
+          <ActivityIndicator size="small" color={colors.blue} />
+          <Text style={styles.statusText}>{status}</Text>
+        </View>
+      ) : null}
       {message.sources && message.sources.research.length > 0 && (
         <FlatList
           horizontal
@@ -285,7 +291,12 @@ export default function ChatScreen() {
             ref={flatListRef}
             data={messages}
             keyExtractor={(m) => m.id}
-            renderItem={({ item }) => <MessageBubble message={item} />}
+            renderItem={({ item, index }) => (
+              <MessageBubble
+                message={item}
+                status={item.streaming && index === messages.length - 1 ? status : undefined}
+              />
+            )}
             contentContainerStyle={styles.messageList}
             onContentSizeChange={scrollToBottom}
           />
@@ -297,12 +308,7 @@ export default function ChatScreen() {
           </View>
         )}
 
-        {status ? (
-          <View style={styles.statusBar}>
-            <ActivityIndicator size="small" color={colors.blue} />
-            <Text style={styles.statusText}>{status}</Text>
-          </View>
-        ) : null}
+        {/* Status now shows inline in the assistant message bubble */}
 
         {/* Usage indicator for free users */}
         {usage && usage.plan === "free" && (
@@ -412,12 +418,11 @@ const styles = StyleSheet.create({
   sourceEmoji: { fontSize: 16 },
   sourceFirm: { fontSize: 12, color: colors.textSecondary, fontWeight: "600" },
   sourceTitle: { fontSize: 12, color: colors.textMuted, lineHeight: 16 },
-  statusBar: {
+  inlineStatus: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
+    paddingVertical: 4,
   },
   statusText: { color: colors.textMuted, fontSize: 13 },
   inputRow: {

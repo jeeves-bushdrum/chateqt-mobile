@@ -22,6 +22,16 @@ export interface Conversation {
   updated_at: string;
 }
 
+/** Normalize conversation objects — API may return camelCase or snake_case */
+function normalizeConversation(c: any): Conversation {
+  return {
+    id: c.id,
+    title: c.title || "Untitled",
+    created_at: c.created_at || c.createdAt || "",
+    updated_at: c.updated_at || c.updatedAt || "",
+  };
+}
+
 async function authHeaders(userEmail: string): Promise<Record<string, string>> {
   if (HAS_API_KEY) {
     return {
@@ -46,12 +56,12 @@ export async function listConversations(
     const res = await fetch(`${V1_BASE}/conversations`, { headers: hdrs });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    return data.conversations;
+    return (data.conversations || []).map(normalizeConversation);
   }
   const res = await fetch(`${WEB_BASE}/conversations`, { headers: hdrs });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  return data.conversations || [];
+  return (data.conversations || []).map(normalizeConversation);
 }
 
 export async function getConversation(
@@ -62,7 +72,11 @@ export async function getConversation(
   const base = HAS_API_KEY ? V1_BASE : WEB_BASE;
   const res = await fetch(`${base}/conversations/${id}`, { headers: hdrs });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  return {
+    conversation: normalizeConversation(data.conversation || data),
+    messages: data.messages || [],
+  };
 }
 
 export async function createConversation(
